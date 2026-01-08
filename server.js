@@ -19,6 +19,7 @@ dotenv.config();
 
 const app = express();
 app.use(cors());
+app.use(express.json());
 
 /* ================= __dirname FIX ================= */
 
@@ -33,23 +34,14 @@ const storage = multer.diskStorage({
     cb(null, Date.now() + "-" + file.originalname);
   },
 });
-
 const upload = multer({ storage });
 
-// Serve uploaded images
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
-
-/* ================= JSON (AFTER MULTER) ================= */
-
-app.use(express.json());
 
 /* ================= PDF STORAGE ================= */
 
 const pdfDir = path.join(__dirname, "pdfs");
-if (!fs.existsSync(pdfDir)) {
-  fs.mkdirSync(pdfDir, { recursive: true });
-}
-
+if (!fs.existsSync(pdfDir)) fs.mkdirSync(pdfDir, { recursive: true });
 app.use("/pdfs", express.static(pdfDir));
 
 /* ================= MONGODB ================= */
@@ -71,72 +63,65 @@ app.post("/doctor/signup", async (req, res) => {
   }
 });
 
+/* ================= PATIENT SIGNUP ================= */
 
-app.post(
-  "/patient/signup",
-  upload.single("profileImage"),
-  async (req, res) => {
-    try {
-      const {
-        name,
-        age,
-        email,
-        phone,
-        surgeryHistory,
-        illnessHistory,
-      } = req.body;
+app.post("/patient/signup", upload.single("profileImage"), async (req, res) => {
+  try {
+    let { name, age, email, phone, surgeryHistory, illnessHistory } = req.body;
 
-      // ✅ basic validation
-      if (!name || !email || !phone) {
-        return res.status(400).json({ error: "Missing required fields" });
-      }
+    email = email?.toLowerCase().trim();
 
-      // ✅ prevent duplicates
-      const existing = await Patient.findOne({
-        $or: [{ email }, { phone }],
-      });
-
-      if (existing) {
-        return res
-          .status(409)
-          .json({ error: "Email or phone already registered" });
-      }
-
-      const patient = await Patient.create({
-        name,
-        age,
-        email,
-        phone,
-        surgeryHistory,
-        illnessHistory: illnessHistory
-          ? illnessHistory.split(",").map(i => i.trim())
-          : [],
-        profileImage: req.file
-          ? `/uploads/${req.file.filename}`
-          : "",
-      });
-
-      res.json(patient);
-    } catch (err) {
-      console.error("Patient signup error:", err);
-      res.status(500).json({ error: err.message });
+    if (!name || !email || !phone) {
+      return res.status(400).json({ error: "Missing required fields" });
     }
-  }
-);
 
-// Logins (JSON only)
+    const existing = await Patient.findOne({
+      $or: [{ email }, { phone }],
+    });
+
+    if (existing) {
+      return res.status(409).json({
+        error: "Email or phone already registered",
+      });
+    }
+
+    const patient = await Patient.create({
+      name,
+      age,
+      email,
+      phone,
+      surgeryHistory,
+      illnessHistory: illnessHistory
+        ? illnessHistory.split(",").map(i => i.trim())
+        : [],
+      profileImage: req.file ? `/uploads/${req.file.filename}` : "",
+    });
+
+    res.json(patient);
+  } catch (err) {
+    console.error("Patient signup error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= LOGINS ================= */
+
+// Doctor login (⚠️ insecure but unchanged)
 app.post("/doctor/login", async (req, res) => {
   const doctor = await Doctor.findOne({ email: req.body.email });
   res.json(doctor);
 });
 
+/* ================= PATIENT LOGIN ================= */
+
 app.post("/patient/login", async (req, res) => {
   try {
-    const { email, phone } = req.body;
+    let { email, phone } = req.body;
+    email = email?.toLowerCase().trim();
 
-    const patient = await Patient.findOne({ email, phone });
+    const patient = await Patient.findOne({ email });
 
-    if (!patient) {
+    if (!patient || patient.phone !== phone) {
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
@@ -147,7 +132,6 @@ app.post("/patient/login", async (req, res) => {
   }
 });
 
-
 /* ================= DATA ================= */
 
 // Doctor list
@@ -157,21 +141,9 @@ app.get("/doctors", async (_, res) => {
 
 // Create consultation
 app.post("/consultation", async (req, res) => {
-  const consultation = await Consultation.create({
-    doctorId: req.body.doctorId,
-    patientId: req.body.patientId,
-    patientName: req.body.patientName,
-    illnessHistory: req.body.illnessHistory,
-    recentSurgery: req.body.recentSurgery,
-    diabetes: req.body.diabetes,
-    allergies: req.body.allergies,
-    others: req.body.others,
-    transactionId: req.body.transactionId,
-  });
-
+  const consultation = await Consultation.create(req.body);
   res.json(consultation);
 });
-
 
 // Doctor dashboard
 app.get("/doctor/consultations/:doctorId", async (req, res) => {
@@ -198,15 +170,13 @@ app.get("/patient/prescriptions/:patientId", async (req, res) => {
 });
 
 /* ================= PRESCRIPTION ================= */
+
 app.post("/prescription/:consultationId", async (req, res) => {
   try {
     const { care, medicine } = req.body;
-
-    if (!care || care.trim() === "") {
+    if (!care?.trim()) {
       return res.status(400).json({ error: "Care is required" });
     }
-
-    /* ================= FETCH DATA ================= */
 
     const consultation = await Consultation.findById(req.params.consultationId);
     if (!consultation) {
@@ -216,21 +186,11 @@ app.post("/prescription/:consultationId", async (req, res) => {
     const doctor = await Doctor.findById(consultation.doctorId);
     const doctorName = doctor?.name || "Doctor";
 
-    /* ================= CREATE PDF ================= */
-
     const pdfDoc = await PDFDocument.create();
     const page = pdfDoc.addPage([600, 800]);
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
-    /* ================= HEADER ================= */
-
-    page.drawText(`Dr. ${doctorName}`, {
-      x: 50,
-      y: 760,
-      size: 14,
-      font,
-    });
-
+    page.drawText(`Dr. ${doctorName}`, { x: 50, y: 760, size: 14, font });
     page.drawText(`Date: ${new Date().toDateString()}`, {
       x: 400,
       y: 760,
@@ -238,118 +198,30 @@ app.post("/prescription/:consultationId", async (req, res) => {
       font,
     });
 
-    /* ================= SEPARATOR ================= */
+    page.drawText("Care to be taken", { x: 50, y: 660, size: 12, font });
+    page.drawRectangle({ x: 50, y: 560, width: 500, height: 80, borderWidth: 1 });
+    page.drawText(care, { x: 60, y: 620, size: 11, font, maxWidth: 480 });
 
-    page.drawRectangle({
-  x: 50,
-  y: 560,
-  width: 500,
-  height: 80,
-  borderWidth: 1,
-  borderColor: rgb(0, 0, 0),
-  color: rgb(1, 1, 1),
-    });
-
-    /* ================= CARE ================= */
-
-  /* ================= CARE SECTION ================= */
-
-/* ================= CARE ================= */
-
-page.drawText("Care to be taken", { x: 50, y: 660, size: 12, font });
-
-page.drawRectangle({
-  x: 50,
-  y: 560,
-  width: 500,
-  height: 80,
-  borderWidth: 1,
-  borderColor: rgb(0, 0, 0),
-});
-
-page.drawText(care, {
-  x: 60,
-  y: 620,
-  size: 11,
-  font,
-  maxWidth: 480,
-  lineHeight: 14,
-});
-
-/* ================= MEDICINE ================= */
-
-page.drawText("Medicine", { x: 50, y: 520, size: 12, font });
-
-page.drawRectangle({
-  x: 50,
-  y: 400,
-  width: 500,
-  height: 100,
-  borderWidth: 1,
-  borderColor: rgb(0, 0, 0),
-});
-
-page.drawText(medicine || "-", {
-  x: 60,
-  y: 470,
-  size: 11,
-  font,
-  maxWidth: 480,
-  lineHeight: 14,
-});
-
-    /* ================= FOOTER ================= */
-
-    page.drawRectangle({
-      x: 0,
-      y: 365,
-      width: 600,
-      height: 4,
-      color: rgb(0, 0, 0.6),
-    });
-
-    page.drawText(`Dr. ${doctorName}`, {
-      x: 420,
-      y: 335,
-      size: 11,
-      font,
-    });
-
-    /* ================= SAVE PDF (ANTI-CACHE FIX) ================= */
+    page.drawText("Medicine", { x: 50, y: 520, size: 12, font });
+    page.drawRectangle({ x: 50, y: 400, width: 500, height: 100, borderWidth: 1 });
+    page.drawText(medicine || "-", { x: 60, y: 470, size: 11, font });
 
     const pdfBytes = await pdfDoc.save();
-
-    // 🔥 UNIQUE FILE NAME (CRITICAL FIX)
     const fileName = `prescription_${req.params.consultationId}_${Date.now()}.pdf`;
-    const filePath = path.join(pdfDir, fileName);
-
-    fs.writeFileSync(filePath, pdfBytes);
-
-    /* ================= SAVE DB ================= */
+    fs.writeFileSync(path.join(pdfDir, fileName), pdfBytes);
 
     await Prescription.findOneAndUpdate(
       { consultationId: req.params.consultationId },
-      {
-        consultationId: req.params.consultationId,
-        care,
-        medicine,
-        pdfPath: `/pdfs/${fileName}`,
-      },
-      { upsert: true, new: true }
+      { consultationId: req.params.consultationId, care, medicine, pdfPath: `/pdfs/${fileName}` },
+      { upsert: true }
     );
 
-    res.json({
-      success: true,
-      message: "Prescription generated successfully",
-      pdfUrl: `/pdfs/${fileName}`,
-    });
-
+    res.json({ success: true, pdfUrl: `/pdfs/${fileName}` });
   } catch (err) {
     console.error("Prescription error:", err);
     res.status(500).json({ error: err.message });
   }
 });
-
 
 /* ================= SERVER ================= */
 
