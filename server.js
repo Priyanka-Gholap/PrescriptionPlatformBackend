@@ -157,8 +157,21 @@ app.get("/doctors", async (_, res) => {
 
 // Create consultation
 app.post("/consultation", async (req, res) => {
-  res.json(await Consultation.create(req.body));
+  const consultation = await Consultation.create({
+    doctorId: req.body.doctorId,
+    patientId: req.body.patientId,
+    patientName: req.body.patientName,
+    illnessHistory: req.body.illnessHistory,
+    recentSurgery: req.body.recentSurgery,
+    diabetes: req.body.diabetes,
+    allergies: req.body.allergies,
+    others: req.body.others,
+    transactionId: req.body.transactionId,
+  });
+
+  res.json(consultation);
 });
+
 
 // Doctor dashboard
 app.get("/doctor/consultations/:doctorId", async (req, res) => {
@@ -228,64 +241,62 @@ app.post("/prescription/:consultationId", async (req, res) => {
     /* ================= SEPARATOR ================= */
 
     page.drawRectangle({
-      x: 0,
-      y: 705,
-      width: 600,
-      height: 4,
-      color: rgb(0, 0, 0.6),
+  x: 50,
+  y: 560,
+  width: 500,
+  height: 80,
+  borderWidth: 1,
+  borderColor: rgb(0, 0, 0),
+  color: rgb(1, 1, 1),
     });
 
     /* ================= CARE ================= */
 
-    page.drawText("Care to be taken", {
-      x: 50,
-      y: 670,
-      size: 12,
-      font,
-    });
+  /* ================= CARE SECTION ================= */
 
-    page.drawRectangle({
-      x: 50,
-      y: 560,
-      width: 500,
-      height: 90,
-      borderWidth: 1,
-    });
+/* ================= CARE ================= */
 
-    page.drawText(care, {
-      x: 55,
-      y: 635,
-      size: 11,
-      font,
-      maxWidth: 480,
-      lineHeight: 15,
-    });
+page.drawText("Care to be taken", { x: 50, y: 660, size: 12, font });
 
-    /* ================= MEDICINE ================= */
+page.drawRectangle({
+  x: 50,
+  y: 560,
+  width: 500,
+  height: 80,
+  borderWidth: 1,
+  borderColor: rgb(0, 0, 0),
+});
 
-    page.drawText("Medicine", {
-      x: 50,
-      y: 520,
-      size: 12,
-      font,
-    });
+page.drawText(care, {
+  x: 60,
+  y: 620,
+  size: 11,
+  font,
+  maxWidth: 480,
+  lineHeight: 14,
+});
 
-    page.drawRectangle({
-      x: 50,
-      y: 400,
-      width: 500,
-      height: 100,
-      borderWidth: 1,
-    });
+/* ================= MEDICINE ================= */
 
-    page.drawText(medicine?.trim() || "-", {
-      x: 55,
-      y: 475,
-      size: 11,
-      font,
-      maxWidth: 480,
-      lineHeight: 15,
-    });
+page.drawText("Medicine", { x: 50, y: 520, size: 12, font });
+
+page.drawRectangle({
+  x: 50,
+  y: 400,
+  width: 500,
+  height: 100,
+  borderWidth: 1,
+  borderColor: rgb(0, 0, 0),
+});
+
+page.drawText(medicine || "-", {
+  x: 60,
+  y: 470,
+  size: 11,
+  font,
+  maxWidth: 480,
+  lineHeight: 14,
+});
 
     /* ================= FOOTER ================= */
 
@@ -341,8 +352,7 @@ app.post("/prescription/:consultationId", async (req, res) => {
 
 
 /* ================= SERVER ================= */
-const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+app.listen(5000, () => {
+  console.log("Server running on 5000");
 });
